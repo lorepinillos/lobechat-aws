@@ -93,6 +93,7 @@ sed -i \
 KEY_VAULTS_SECRET=$(openssl rand -base64 32 | tr -d '\n')
 NEXT_AUTH_SECRET=$(openssl rand -base64 32 | tr -d '\n')
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
+MINIO_ROOT_USER=lobechat
 MINIO_ROOT_PASSWORD=$(openssl rand -hex 16)
 LITELLM_MASTER_KEY="sk-$(openssl rand -hex 24)"
 
@@ -149,6 +150,19 @@ chown -R ubuntu:ubuntu "$APP_DIR/data" "$APP_DIR/config/ssh"
 # Bring up the stack as ubuntu (uses the docker group membership).
 cd "$APP_DIR"
 sudo -u ubuntu docker compose --env-file "$ENV_FILE" up -d --build
+
+# Wait for MinIO healthcheck then create the LobeChat bucket. LobeChat
+# uploads fail if the bucket does not exist on first use.
+echo "=== waiting for minio healthcheck before bucket setup ==="
+for i in $(seq 1 30); do
+  if sudo -u ubuntu docker inspect --format '{{.State.Health.Status}}' minio 2>/dev/null | grep -q healthy; then
+    break
+  fi
+  sleep 5
+done
+sudo -u ubuntu docker exec minio mc alias set local http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" || true
+sudo -u ubuntu docker exec minio mc mb -p local/lobe || true
+sudo -u ubuntu docker exec minio mc anonymous set download local/lobe || true
 
 echo "=== bootstrap done: $(date -u +%FT%TZ) ==="
 echo "Stack should be reachable at https://$PUBLIC_HOSTNAME within a few minutes."

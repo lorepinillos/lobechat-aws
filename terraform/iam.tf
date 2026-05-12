@@ -50,8 +50,11 @@ resource "aws_iam_role_policy" "bedrock_invoke" {
         # Cross-region inference profiles call the underlying model in every
         # region in the profile's region group. We grant access broadly to the
         # foundation-model resource type so eu-central-1, eu-north-1, etc. are
-        # covered. Locked to anthropic.* model IDs only.
-        Resource = "arn:aws:bedrock:*::foundation-model/anthropic.*"
+        # covered. Anthropic models (chat) + Amazon Titan embed (files RAG).
+        Resource = [
+          "arn:aws:bedrock:*::foundation-model/anthropic.*",
+          "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-*",
+        ]
       },
       {
         Sid    = "ListAndDescribe"

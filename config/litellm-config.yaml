@@ -3,20 +3,32 @@ model_list:
     litellm_params:
       model: bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0
       aws_region_name: eu-west-1
+      # Bedrock-hosted Anthropic models reject requests with BOTH temperature
+      # and top_p set ("cannot both be specified"). LobeChat sends both. Drop
+      # top_p so only temperature reaches Bedrock.
+      additional_drop_params: ["top_p"]
 
   - model_name: claude-sonnet-4-5
     litellm_params:
       model: bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0
       aws_region_name: eu-west-1
+      additional_drop_params: ["top_p"]
 
   - model_name: claude-sonnet-4-6
     litellm_params:
       model: bedrock/eu.anthropic.claude-sonnet-4-6
       aws_region_name: eu-west-1
+      additional_drop_params: ["top_p"]
+
+  # Embedding model for LobeChat's file feature.
+  # Bedrock-hosted Amazon Titan v2; no use-case form required (Anthropic
+  # was the only Bedrock vendor that gates on it).
+  - model_name: titan-embed
+    litellm_params:
+      model: bedrock/amazon.titan-embed-text-v2:0
+      aws_region_name: eu-west-1
 
 general_settings:
-  # Master key used by clients (LobeChat sends this as Authorization: Bearer …)
-  # Matched against LITELLM_MASTER_KEY env var.
   master_key: os.environ/LITELLM_MASTER_KEY
 
 litellm_settings:
