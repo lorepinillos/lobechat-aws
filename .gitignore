@@ -24,3 +24,12 @@ aws_credentials.yaml
 .vscode/
 *.swp
 config/ssh/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+terraform.tfvars
+.terraform.tfstate.lock.info
