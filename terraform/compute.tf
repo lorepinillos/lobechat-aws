@@ -36,10 +36,14 @@ resource "aws_eip" "instance" {
   }
 }
 
-# Derived hostname used by Caddy / app config — traefik.me serves a valid
-# wildcard cert for any subdomain of the form <dashed-ip>.traefik.me.
+# Derived hostname used by Caddy / app config — sslip.io resolves any
+# <dashed-ip>.sslip.io to the embedded IP. Caddy issues a Let's Encrypt
+# cert at boot via HTTP-01 (port 80 is open and reaches the box).
+#
+# We previously used traefik.me but its DNS was failing on 2026-05-12, so
+# sslip.io is the working alternative the spec also explicitly allows.
 locals {
-  public_hostname = "${replace(aws_eip.instance.public_ip, ".", "-")}.traefik.me"
+  public_hostname = "${replace(aws_eip.instance.public_ip, ".", "-")}.sslip.io"
 }
 
 resource "aws_instance" "main" {

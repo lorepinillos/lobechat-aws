@@ -1,13 +1,11 @@
 {
-	# Global options
-	auto_https off
+	# Use Let's Encrypt for the sslip.io hostname (HTTP-01 challenge on :80).
+	# Email left empty -> ACME tos prompt is auto-accepted in non-interactive mode.
 	admin off
 }
 
-# Public hostname: <dashed-eip>.traefik.me, cert pre-fetched at boot
-{$HOST_DOMAIN}:443 {
-	tls /etc/caddy/certs/traefik-me.crt /etc/caddy/certs/traefik-me.key
-
+# Public hostname: <dashed-eip>.sslip.io, cert via Let's Encrypt at boot.
+{$HOST_DOMAIN} {
 	# Casdoor SSO at /casdoor/* → casdoor:8000
 	handle_path /casdoor/* {
 		reverse_proxy casdoor:8000 {
@@ -37,22 +35,9 @@
 	}
 }
 
-# Plain HTTP on port 80 → permanent redirect to HTTPS for the expected host;
-# everything else gets a 421 (Misdirected Request) so raw-IP probes are rejected.
+# Reject any request whose Host header doesn't match the expected hostname.
+# Without a matching cert, raw-IP HTTPS handshakes already fail upstream;
+# this is the application-layer defense.
 :80 {
-	@expected host {$HOST_DOMAIN}
-	handle @expected {
-		redir https://{host}{uri} permanent
-	}
-	handle {
-		respond "Misdirected Request" 421
-	}
-}
-
-# Reject HTTPS connections that don't match the expected hostname.
-# Without a cert for raw IPs, a TLS handshake against the IP fails before this,
-# but this is the defense-in-depth layer for any other hostname.
-:443 {
-	tls /etc/caddy/certs/traefik-me.crt /etc/caddy/certs/traefik-me.key
 	respond "Misdirected Request" 421
 }

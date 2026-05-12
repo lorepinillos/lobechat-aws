@@ -65,12 +65,9 @@ ENV_FILE=$APP_DIR/.env
 git clone --branch "$REPO_REF" --depth 1 "$REPO_URL" "$APP_DIR"
 chown -R ubuntu:ubuntu "$APP_DIR"
 
-# Pre-fetch traefik.me wildcard cert (pre-issued by ZeroSSL, valid for *.traefik.me).
-mkdir -p "$APP_DIR/data/caddy/certs"
-curl -fsSL https://traefik.me/cert.pem  -o "$APP_DIR/data/caddy/certs/traefik-me.crt"
-curl -fsSL https://traefik.me/privkey.pem -o "$APP_DIR/data/caddy/certs/traefik-me.key"
-chmod 0644 "$APP_DIR/data/caddy/certs/traefik-me.crt"
-chmod 0600 "$APP_DIR/data/caddy/certs/traefik-me.key"
+# Caddy issues a Let's Encrypt cert at startup for $PUBLIC_HOSTNAME using
+# HTTP-01. Just create the data dirs so Caddy can persist its acme state.
+mkdir -p "$APP_DIR/data/caddy/data" "$APP_DIR/data/caddy/config"
 
 # Rewrite Casdoor URLs to our public HTTPS hostname.
 # init_data.json + app.conf both hardcode http://wsl.ymbihq.local:47000/47002.
