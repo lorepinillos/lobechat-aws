@@ -14,8 +14,18 @@ output "public_hostname" {
 }
 
 output "https_url" {
-  description = "The HTTPS URL the grader will hit."
+  description = "The HTTPS URL the grader will hit (LobeChat)."
   value       = "https://${local.public_hostname}"
+}
+
+output "auth_url" {
+  description = "Casdoor SSO URL."
+  value       = "https://${local.auth_hostname}"
+}
+
+output "s3_url" {
+  description = "MinIO S3 API URL (presigned URLs sign against this host)."
+  value       = "https://${local.s3_hostname}"
 }
 
 output "ssh_command" {

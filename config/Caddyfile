@@ -1,43 +1,35 @@
 {
-	# Use Let's Encrypt for the sslip.io hostname (HTTP-01 challenge on :80).
-	# Email left empty -> ACME tos prompt is auto-accepted in non-interactive mode.
 	admin off
 }
 
-# Public hostname: <dashed-eip>.sslip.io, cert via Let's Encrypt at boot.
-{$HOST_DOMAIN} {
-	# Casdoor SSO at /casdoor/* → casdoor:8000
-	handle_path /casdoor/* {
-		reverse_proxy casdoor:8000 {
-			header_up Host {http.reverse_proxy.upstream.hostport}
-			header_up X-Forwarded-Proto https
-		}
-	}
-
-	# MinIO S3 API at /s3/* → minio:9000 (presigned URLs go through here)
-	handle_path /s3/* {
-		reverse_proxy minio:9000 {
-			header_up Host {http.reverse_proxy.upstream.hostport}
-		}
-	}
-
-	# LobeChat at / (catch-all)
-	handle {
-		reverse_proxy lobe-chat:3210 {
-			header_up Host {host}
-			header_up X-Forwarded-Proto https
-			# Allow long-lived SSE / WebSocket connections
-			transport http {
-				read_timeout 300s
-				keepalive 300s
-			}
+# LobeChat — primary hostname
+{$HOST_DOMAIN_LOBE} {
+	reverse_proxy lobe-chat:3210 {
+		header_up Host {host}
+		header_up X-Forwarded-Proto https
+		transport http {
+			read_timeout 300s
+			keepalive 300s
 		}
 	}
 }
 
-# Reject any request whose Host header doesn't match the expected hostname.
-# Without a matching cert, raw-IP HTTPS handshakes already fail upstream;
-# this is the application-layer defense.
+# Casdoor SSO — auth-prefixed hostname (own cert, own LE issuance)
+{$HOST_DOMAIN_AUTH} {
+	reverse_proxy casdoor:8000 {
+		header_up Host {host}
+		header_up X-Forwarded-Proto https
+	}
+}
+
+# MinIO S3 API — s3-prefixed hostname (presigned URLs sign against this host)
+{$HOST_DOMAIN_S3} {
+	reverse_proxy minio:9000 {
+		header_up Host {host}
+	}
+}
+
+# Reject anything that does not match the expected hostnames.
 :80 {
 	respond "Misdirected Request" 421
 }

@@ -10,7 +10,9 @@ services:
       - ./data/caddy/data:/data
       - ./data/caddy/config:/config
     environment:
-      - HOST_DOMAIN=${HOST_DOMAIN}
+      - HOST_DOMAIN_LOBE=${HOST_DOMAIN_LOBE}
+      - HOST_DOMAIN_AUTH=${HOST_DOMAIN_AUTH}
+      - HOST_DOMAIN_S3=${HOST_DOMAIN_S3}
     depends_on:
       lobe-chat:
         condition: service_started
@@ -43,26 +45,28 @@ services:
       # HOTFIX: Patch MCP callTool to add session retry logic
       - ./patches/route.js:/app/.next/server/app/(backend)/trpc/tools/[trpc]/route.js:ro
     environment:
-      # App configuration (HTTPS via Caddy, no port)
-      - APP_URL=https://${HOST_DOMAIN}
+      # App configuration (HTTPS via Caddy)
+      - APP_URL=https://${HOST_DOMAIN_LOBE}
       # Database configuration
       - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/lobechat
       # NextAuth SSO configuration
       - NEXT_AUTH_SSO_PROVIDERS=casdoor
       - NEXT_AUTH_SECRET=${NEXT_AUTH_SECRET}
-      - NEXTAUTH_URL=https://${HOST_DOMAIN}
-      - AUTH_URL=https://${HOST_DOMAIN}
-      # Casdoor configuration (browser-facing URL via Caddy)
-      - AUTH_CASDOOR_ISSUER=https://${HOST_DOMAIN}/casdoor
+      - NEXTAUTH_URL=https://${HOST_DOMAIN_LOBE}
+      - AUTH_URL=https://${HOST_DOMAIN_LOBE}
+      # Casdoor on its own subdomain (auth-<dashed-ip>.nip.io) avoids the
+      # path-prefix issues Casdoor's React frontend has with absolute asset URLs.
+      - AUTH_CASDOOR_ISSUER=https://${HOST_DOMAIN_AUTH}
       - AUTH_CASDOOR_ID=${AUTH_CASDOOR_ID}
       - AUTH_CASDOOR_SECRET=${AUTH_CASDOOR_SECRET}
       # Trust custom hostname for NextAuth
       - AUTH_TRUST_HOST=true
-      # S3 Storage configuration
-      # S3_ENDPOINT is server-side (container-to-container); S3_PUBLIC_DOMAIN is what the browser uses for presigned URLs
+      # S3: server-side stays on the docker network; browser-facing
+      # (presigned URLs) goes to the s3- subdomain so MinIO signature
+      # checks pass without path-prefix rewriting.
       - S3_ENDPOINT=http://minio:9000
       - S3_BUCKET=${S3_BUCKET:-lobe}
-      - S3_PUBLIC_DOMAIN=https://${HOST_DOMAIN}/s3
+      - S3_PUBLIC_DOMAIN=https://${HOST_DOMAIN_S3}
       - S3_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
       - S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - S3_ENABLE_PATH_STYLE=1
@@ -167,7 +171,7 @@ services:
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
-      - MINIO_API_CORS_ALLOW_ORIGIN=https://${HOST_DOMAIN}
+      - MINIO_API_CORS_ALLOW_ORIGIN=https://${HOST_DOMAIN_LOBE}
     command: server /data --console-address ":9001"
     restart: unless-stopped
     healthcheck:

@@ -36,14 +36,18 @@ resource "aws_eip" "instance" {
   }
 }
 
-# Derived hostname used by Caddy / app config — sslip.io resolves any
-# <dashed-ip>.sslip.io to the embedded IP. Caddy issues a Let's Encrypt
+# Derived hostname used by Caddy / app config — nip.io resolves any
+# <dashed-ip>.nip.io to the embedded IP. Caddy issues a Let's Encrypt
 # cert at boot via HTTP-01 (port 80 is open and reaches the box).
 #
-# We previously used traefik.me but its DNS was failing on 2026-05-12, so
-# sslip.io is the working alternative the spec also explicitly allows.
+# History: traefik.me DNS was failing on 2026-05-12, and sslip.io had
+# been rate-limited by Let's Encrypt (250k certs/week hit). nip.io is
+# the working alternative the spec also explicitly allows.
 locals {
-  public_hostname = "${replace(aws_eip.instance.public_ip, ".", "-")}.sslip.io"
+  ip_dashed       = replace(aws_eip.instance.public_ip, ".", "-")
+  public_hostname = "${local.ip_dashed}.nip.io"        # LobeChat
+  auth_hostname   = "auth-${local.ip_dashed}.nip.io"   # Casdoor
+  s3_hostname     = "s3-${local.ip_dashed}.nip.io"     # MinIO
 }
 
 resource "aws_instance" "main" {
@@ -64,6 +68,8 @@ resource "aws_instance" "main" {
   user_data = templatefile("${path.module}/user_data.sh", {
     aws_region      = var.aws_region
     public_hostname = local.public_hostname
+    auth_hostname   = local.auth_hostname
+    s3_hostname     = local.s3_hostname
     repo_url        = var.repo_url
     repo_ref        = var.repo_ref
   })
