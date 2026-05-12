@@ -1,0 +1,58 @@
+{
+	# Global options
+	auto_https off
+	admin off
+}
+
+# Public hostname: <dashed-eip>.traefik.me, cert pre-fetched at boot
+{$HOST_DOMAIN}:443 {
+	tls /etc/caddy/certs/traefik-me.crt /etc/caddy/certs/traefik-me.key
+
+	# Casdoor SSO at /casdoor/* → casdoor:8000
+	handle_path /casdoor/* {
+		reverse_proxy casdoor:8000 {
+			header_up Host {http.reverse_proxy.upstream.hostport}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	# MinIO S3 API at /s3/* → minio:9000 (presigned URLs go through here)
+	handle_path /s3/* {
+		reverse_proxy minio:9000 {
+			header_up Host {http.reverse_proxy.upstream.hostport}
+		}
+	}
+
+	# LobeChat at / (catch-all)
+	handle {
+		reverse_proxy lobe-chat:3210 {
+			header_up Host {host}
+			header_up X-Forwarded-Proto https
+			# Allow long-lived SSE / WebSocket connections
+			transport http {
+				read_timeout 300s
+				keepalive 300s
+			}
+		}
+	}
+}
+
+# Plain HTTP on port 80 → permanent redirect to HTTPS for the expected host;
+# everything else gets a 421 (Misdirected Request) so raw-IP probes are rejected.
+:80 {
+	@expected host {$HOST_DOMAIN}
+	handle @expected {
+		redir https://{host}{uri} permanent
+	}
+	handle {
+		respond "Misdirected Request" 421
+	}
+}
+
+# Reject HTTPS connections that don't match the expected hostname.
+# Without a cert for raw IPs, a TLS handshake against the IP fails before this,
+# but this is the defense-in-depth layer for any other hostname.
+:443 {
+	tls /etc/caddy/certs/traefik-me.crt /etc/caddy/certs/traefik-me.key
+	respond "Misdirected Request" 421
+}

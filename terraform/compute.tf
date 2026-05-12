@@ -60,7 +60,18 @@ resource "aws_instance" "main" {
   user_data = templatefile("${path.module}/user_data.sh", {
     aws_region      = var.aws_region
     public_hostname = local.public_hostname
+    repo_url        = var.repo_url
+    repo_ref        = var.repo_ref
   })
+
+  # Containers reach IMDS via the docker bridge → host. Default hop limit (1)
+  # blocks this; bump to 2 so LiteLLM/MCPHub boto3 can pick up the instance
+  # role credentials.
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
 
   # Recreate the instance when user_data changes so we always get a fresh
   # bootstrap. Comment this out once the box is healthy and you only want

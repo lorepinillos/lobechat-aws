@@ -1,9 +1,29 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy/certs:/etc/caddy/certs:ro
+      - ./data/caddy/data:/data
+      - ./data/caddy/config:/config
+    environment:
+      - HOST_DOMAIN=${HOST_DOMAIN}
+    depends_on:
+      lobe-chat:
+        condition: service_started
+      casdoor:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
   casdoor:
     image: casbin/casdoor:v2.13.0
     container_name: casdoor
-    ports:
-      - "${CASDOOR_PORT:-47002}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -12,7 +32,7 @@ services:
       - driverName=postgres
       - dataSourceName=user=postgres password=${POSTGRES_PASSWORD:-postgres} host=postgres port=5432 sslmode=disable dbname=casdoor
     volumes:
-      - ./config/init_data.json:/init_data.json:ro
+      - ./data/casdoor/init_data.json:/init_data.json:ro
       - ./config/casdoor-app.conf:/conf/app.conf:ro
     command: /bin/sh -c './server --createDatabase=true'
     restart: unless-stopped
@@ -20,45 +40,39 @@ services:
   lobe-chat:
     image: lobehub/lobe-chat-database
     container_name: lobe-chat
-    ports:
-      - "${LOBECHAT_PORT:-47000}:3210"
     volumes:
       # HOTFIX: Patch MCP callTool to add session retry logic
       - ./patches/route.js:/app/.next/server/app/(backend)/trpc/tools/[trpc]/route.js:ro
     environment:
-      # App configuration
-      - APP_URL=http://${HOST_DOMAIN:-localhost}:${LOBECHAT_PORT:-47000}
+      # App configuration (HTTPS via Caddy, no port)
+      - APP_URL=https://${HOST_DOMAIN}
       # Database configuration
       - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/lobechat
       # NextAuth SSO configuration
       - NEXT_AUTH_SSO_PROVIDERS=casdoor
       - NEXT_AUTH_SECRET=${NEXT_AUTH_SECRET}
-      - NEXTAUTH_URL=http://${HOST_DOMAIN:-localhost}:${LOBECHAT_PORT:-47000}
-      - AUTH_URL=http://${HOST_DOMAIN:-localhost}:${LOBECHAT_PORT:-47000}
-      # Casdoor configuration
-      - AUTH_CASDOOR_ISSUER=http://${HOST_DOMAIN:-localhost}:${CASDOOR_PORT:-47002}
+      - NEXTAUTH_URL=https://${HOST_DOMAIN}
+      - AUTH_URL=https://${HOST_DOMAIN}
+      # Casdoor configuration (browser-facing URL via Caddy)
+      - AUTH_CASDOOR_ISSUER=https://${HOST_DOMAIN}/casdoor
       - AUTH_CASDOOR_ID=${AUTH_CASDOOR_ID}
       - AUTH_CASDOOR_SECRET=${AUTH_CASDOOR_SECRET}
       # Trust custom hostname for NextAuth
       - AUTH_TRUST_HOST=true
       # S3 Storage configuration
-      - S3_ENDPOINT=http://${HOST_DOMAIN:-localhost}:${MINIO_PORT:-47005}
+      # S3_ENDPOINT is server-side (container-to-container); S3_PUBLIC_DOMAIN is what the browser uses for presigned URLs
+      - S3_ENDPOINT=http://minio:9000
       - S3_BUCKET=${S3_BUCKET:-lobe}
-      - S3_PUBLIC_DOMAIN=http://${HOST_DOMAIN:-localhost}:${MINIO_PORT:-47005}
+      - S3_PUBLIC_DOMAIN=https://${HOST_DOMAIN}/s3
       - S3_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
       - S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - S3_ENABLE_PATH_STYLE=1
       - S3_SET_ACL=0
       # Key Vaults Secret
       - KEY_VAULTS_SECRET=${KEY_VAULTS_SECRET}
-      # OpenRouter integration
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - ENABLED_OPENROUTER=1
-      # OpenRouter as OpenAI-compatible endpoint (for embeddings)
-      - OPENAI_API_KEY=${OPENROUTER_API_KEY}
-      - OPENAI_PROXY_URL=https://openrouter.ai/api/v1
-      # Embedding model configuration
-      - DEFAULT_FILES_CONFIG=embedding_model=openai/text-embedding-3-small
+      # LiteLLM as OpenAI-compatible Bedrock proxy
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY}
+      - OPENAI_PROXY_URL=http://litellm:4000/v1
       - LLM_VISION_IMAGE_USE_BASE64=1
       # Suppress changelog modal + update-check redirect on every page load
       - FEATURE_FLAGS=-changelog,-check_updates
@@ -70,8 +84,20 @@ services:
         condition: service_started
       minio:
         condition: service_healthy
-      vllm:
-        condition: service_healthy
+      litellm:
+        condition: service_started
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - AWS_REGION=${AWS_REGION:-eu-west-1}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-eu-west-1}
+    volumes:
+      - ./config/litellm-config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+    restart: unless-stopped
 
   mcphub:
     build:
@@ -79,38 +105,28 @@ services:
       dockerfile: dockerfiles/mcphub.Dockerfile
     image: lobechat-aws-mcphub:latest
     container_name: mcphub
-    ports:
-      - "${MCPHUB_PORT:-47008}:3000"
     environment:
-      - SSH_HOST=${SSH_HOST}
+      - SSH_HOST=${SSH_HOST:-}
       - SSH_PORT=${SSH_PORT:-22}
-      - SSH_USERNAME=${SSH_USERNAME}
+      - SSH_USERNAME=${SSH_USERNAME:-}
       - SSH_PRIVATE_KEY_FILE=/app/ssh/id_rsa
-      - SSH_ALLOWED_COMMANDS=${SSH_ALLOWED_COMMANDS}
-      - SSH_ALLOWED_PATHS=${SSH_ALLOWED_PATHS}
-      - SSH_COMMANDS_BLACKLIST=${SSH_COMMANDS_BLACKLIST}
-      - SSH_ARGUMENTS_BLACKLIST=${SSH_ARGUMENTS_BLACKLIST}
-      # AWS region config (credentials read from mounted ~/.aws)
+      - SSH_ALLOWED_COMMANDS=${SSH_ALLOWED_COMMANDS:-}
+      - SSH_ALLOWED_PATHS=${SSH_ALLOWED_PATHS:-}
+      - SSH_COMMANDS_BLACKLIST=${SSH_COMMANDS_BLACKLIST:-}
+      - SSH_ARGUMENTS_BLACKLIST=${SSH_ARGUMENTS_BLACKLIST:-}
       - AWS_REGION=${AWS_REGION:-eu-west-1}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-eu-west-1}
-      # Notion MCP integration token (Bearer header)
-      - OPENAPI_MCP_HEADERS=${OPENAPI_MCP_HEADERS}
+      - OPENAPI_MCP_HEADERS=${OPENAPI_MCP_HEADERS:-}
     volumes:
       - ./config/mcp_settings.json:/app/mcp_settings.json
       - ./data/mcphub:/app/data
       - ./config/ssh:/app/ssh:ro
-      # AWS credentials - mounted so boto3 reads fresh creds without container restart
-      - ~/.aws:/root/.aws:ro
-      # Docker socket for MCP servers that use docker (aws-resources-operations)
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
   qdrant:
     image: qdrant/qdrant:latest
     container_name: qdrant
-    ports:
-      - "${QDRANT_PORT:-47010}:6333"
-      - "${QDRANT_GRPC_PORT:-47011}:6334"
     volumes:
       - ./data/qdrant:/qdrant/storage
     restart: unless-stopped
@@ -123,8 +139,6 @@ services:
   hayhooks:
     image: deepset/hayhooks:v1.1.0
     container_name: hayhooks
-    ports:
-      - "${HAYHOOKS_PORT:-47012}:1416"
     environment:
       - HAYHOOKS_HOST=0.0.0.0
       - HAYHOOKS_PORT=1416
@@ -137,8 +151,6 @@ services:
   hayhooks-mcp:
     image: deepset/hayhooks:v1.1.0
     container_name: hayhooks-mcp
-    ports:
-      - "${HAYHOOKS_MCP_PORT:-47013}:1417"
     environment:
       - QDRANT_URL=http://qdrant:6333
     entrypoint: ["sh","-c"]
@@ -148,51 +160,15 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  vllm:
-    image: vllm/vllm-openai:gemma4
-    container_name: vllm
-    ports:
-      - "${VLLM_PORT:-47007}:8000"
-    environment:
-      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
-    volumes:
-      - ./data/huggingface:/root/.cache/huggingface
-    command: >
-      --model ${VLLM_MODEL_ID:-google/gemma-4-E4B-it}
-      --trust-remote-code
-      --max-model-len 32768
-      --dtype bfloat16
-      --gpu-memory-utilization 0.9
-      --enable-auto-tool-choice
-      --tool-call-parser gemma4
-      --reasoning-parser gemma4
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 300s
-
   minio:
     image: minio/minio:latest
     container_name: minio
-    ports:
-      - "${MINIO_PORT:-47005}:9000"      # S3 API
-      - "${MINIO_CONSOLE_PORT:-47006}:9001"      # MinIO Console
     volumes:
       - ./data/minio:/data
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
-      - MINIO_API_CORS_ALLOW_ORIGIN=http://${HOST_DOMAIN:-localhost}:${LOBECHAT_PORT:-47000}
+      - MINIO_API_CORS_ALLOW_ORIGIN=https://${HOST_DOMAIN}
     command: server /data --console-address ":9001"
     restart: unless-stopped
     healthcheck:
@@ -201,24 +177,9 @@ services:
       timeout: 5s
       retries: 5
 
-
-  linux-sandbox:
-    build:
-      context: .
-      dockerfile: dockerfiles/sandbox.Dockerfile
-    image: lobechat-aws-linux-sandbox:latest
-    container_name: linux-sandbox
-    volumes:
-      - /home/oriol/.ssh:/home/oriol/.ssh
-    restart: unless-stopped
-    # Idle container; commands are exec'd in via the linux-sandbox MCP server
-    command: ["tail", "-f", "/dev/null"]
-
   postgres:
     image: pgvector/pgvector:pg16
     container_name: shared-postgres
-    ports:
-      - "${POSTGRES_PORT:-47003}:5432"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
@@ -234,5 +195,6 @@ services:
     restart: unless-stopped
     shm_size: 128mb
 
-# All data is stored in host folders under ./data/
-# No Docker volumes needed
+# Spec requires LobeChat reachable only through reverse proxy.
+# Only caddy binds host ports (80/443). All other services are reachable
+# only on the docker bridge network.

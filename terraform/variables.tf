@@ -70,6 +70,18 @@ variable "bedrock_inference_profile_ids" {
   ]
 }
 
+variable "repo_url" {
+  description = "Git URL of the lobechat-aws fork the EC2 should clone at boot."
+  type        = string
+  default     = "https://github.com/lorepinillos/lobechat-aws.git"
+}
+
+variable "repo_ref" {
+  description = "Branch or tag to check out from repo_url."
+  type        = string
+  default     = "main"
+}
+
 variable "bedrock_foundation_model_arns_extra" {
   description = "Optional extra Bedrock foundation model ARNs allowed (for cross-region inference, the underlying model ARNs are also required)."
   type        = list(string)
