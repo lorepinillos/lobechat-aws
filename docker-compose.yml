@@ -61,10 +61,13 @@ services:
       - AUTH_CASDOOR_SECRET=${AUTH_CASDOOR_SECRET}
       # Trust custom hostname for NextAuth
       - AUTH_TRUST_HOST=true
-      # S3: server-side stays on the docker network; browser-facing
-      # (presigned URLs) goes to the s3- subdomain so MinIO signature
-      # checks pass without path-prefix rewriting.
-      - S3_ENDPOINT=http://minio:9000
+      # S3 endpoint must equal the public domain — LobeChat hands the
+      # presigned URL directly to the browser without rewriting the host,
+      # so signing against http://minio:9000 (internal) causes a
+      # Mixed Content block when the page is served over HTTPS.
+      # Server-side calls from this container reach the public host via
+      # docker DNS + the EC2's NAT loopback, so this still works.
+      - S3_ENDPOINT=https://${HOST_DOMAIN_S3}
       - S3_BUCKET=${S3_BUCKET:-lobe}
       - S3_PUBLIC_DOMAIN=https://${HOST_DOMAIN_S3}
       # Same value but exposed to the Next.js bundle so the browser
@@ -182,6 +185,7 @@ services:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
       - MINIO_API_CORS_ALLOW_ORIGIN=https://${HOST_DOMAIN_LOBE}
+      - MINIO_REGION_NAME=us-east-1
     command: server /data --console-address ":9001"
     restart: unless-stopped
     healthcheck:
